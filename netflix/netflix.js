@@ -286,7 +286,7 @@ function playBreakChime(){
   });
 }
 
-// Show the small optional prompt; if ignored, it disappears after five seconds.
+// Show the optional prompt; if ignored, it fades after eight seconds and playback resumes.
 function showBreak(){
   breakShown=true;
   playBreakChime();
@@ -307,6 +307,12 @@ if(popup.style.display === "block"){
 popup.style.display="none";
 
 breakShown=false;
+
+// The reminder pause is temporary. If the viewer did not choose a break or
+// close the episode, resume automatically after the prompt has had time to fade.
+if (!demoBlankScreen && !video.ended) {
+  video.play().then(()=>{playButton.innerHTML="❚❚";}).catch(()=>{});
+}
 
 }
 
