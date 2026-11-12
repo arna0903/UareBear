@@ -46,6 +46,7 @@ let ambientFilter = null;
 let ambientSoundEnabled = true;
 try { ambientSoundEnabled = localStorage.getItem("ambientSoundUareBear") !== "off"; } catch (e) {}
 let ambientSceneActive = false;
+let ambientBreakActive = false;
 let ambientNoteTimer = null;
 let ambientNoteIndex = 0;
 
@@ -81,7 +82,7 @@ function ensureAmbientAudio() {
   return true;
 }
 
-// Fade the generated sound in only while the reflection scene is active and sound is enabled.
+// Fade the generated sound in only during the reflection scene or optional rest card.
 function updateAmbientAudio() {
   const button = document.getElementById("ambientToggle");
   if (button) {
@@ -91,14 +92,15 @@ function updateAmbientAudio() {
   if (ambientContext && ambientMaster) {
     const now = ambientContext.currentTime;
     ambientMaster.gain.cancelScheduledValues(now);
-    // Keep the ambience audible under the reflection and the optional 20-second rest card.
-    ambientMaster.gain.setTargetAtTime(ambientSoundEnabled && ambientSceneActive ? 0.82 : 0.0001, now, 0.9);
+    // A modest master increase keeps the ambience audible without making it intrusive.
+    const ambienceActive = ambientSceneActive || ambientBreakActive;
+    ambientMaster.gain.setTargetAtTime(ambientSoundEnabled && ambienceActive ? 1.0 : 0.0001, now, 0.9);
   }
 }
 
 // Play one soft sine note with a slow attack and release to avoid a sharp alert-like sound.
 function playAmbientNote() {
-  if (!ambientContext || !ambientSoundEnabled || !ambientSceneActive) return;
+  if (!ambientContext || !ambientSoundEnabled || (!ambientSceneActive && !ambientBreakActive)) return;
   const notes = [392.00, 329.63, 440.00, 349.23, 392.00, 293.66];
   const now = ambientContext.currentTime;
   const osc = ambientContext.createOscillator();
@@ -106,7 +108,7 @@ function playAmbientNote() {
   osc.type = "sine";
   osc.frequency.value = notes[ambientNoteIndex++ % notes.length];
   level.gain.setValueAtTime(0.0001, now);
-  level.gain.exponentialRampToValueAtTime(0.06, now + 0.55);
+  level.gain.exponentialRampToValueAtTime(0.075, now + 0.55);
   level.gain.exponentialRampToValueAtTime(0.0001, now + 4.8);
   osc.connect(level);
   level.connect(ambientFilter);
@@ -114,19 +116,30 @@ function playAmbientNote() {
   osc.stop(now + 4.9);
 }
 
-// The bear bridge calls this when it shows or hides the reflection scene.
-function setAmbientScene(active) {
-  ambientSceneActive = active;
-  if (active) {
-    ensureAmbientAudio();
-    if (!ambientNoteTimer) {
-      playAmbientNote();
-      ambientNoteTimer = setInterval(playAmbientNote, 5200);
-    }
-  } else if (ambientNoteTimer) {
+function syncAmbientNotes() {
+  const shouldPlayNotes = ambientSoundEnabled && (ambientSceneActive || ambientBreakActive);
+  if (shouldPlayNotes && !ambientNoteTimer) {
+    playAmbientNote();
+    ambientNoteTimer = setInterval(playAmbientNote, 5200);
+  } else if (!shouldPlayNotes && ambientNoteTimer) {
     clearInterval(ambientNoteTimer);
     ambientNoteTimer = null;
   }
+}
+
+// The bear bridge calls this when it shows or hides the reflection scene.
+function setAmbientScene(active) {
+  ambientSceneActive = active;
+  if (active) ensureAmbientAudio();
+  syncAmbientNotes();
+  updateAmbientAudio();
+}
+
+// The rest card gets the same gentle ambience as the reflection scene.
+function setAmbientBreak(active) {
+  ambientBreakActive = active;
+  if (active) ensureAmbientAudio();
+  syncAmbientNotes();
   updateAmbientAudio();
 }
 
@@ -135,6 +148,7 @@ function toggleAmbientSound() {
   ambientSoundEnabled = !ambientSoundEnabled;
   try { localStorage.setItem("ambientSoundUareBear", ambientSoundEnabled ? "on" : "off"); } catch (e) {}
   if (ambientSoundEnabled) ensureAmbientAudio();
+  syncAmbientNotes();
   updateAmbientAudio();
 }
 
@@ -263,7 +277,7 @@ setInterval(()=>{
   }
 },1000);
 
-// A short 740 Hz sine tone marks the optional reminder without using an audio library.
+// A short, rounded four-note melody marks the optional reminder without an audio library.
 function playBreakChime(){
   if (!ambientSoundEnabled) return;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -272,17 +286,17 @@ function playBreakChime(){
   if (!ambientContext) return;
   if (ambientContext.state === "suspended") ambientContext.resume().catch(()=>{});
   const now = ambientContext.currentTime;
-  // A gentle two-note, rounded chime is more distinctive than a single alert-like beep.
-  [[523.25, 0, 0.052], [659.25, 0.14, 0.04]].forEach(([hz, delay, peak]) => {
+  // A soft rising-and-returning phrase sounds more musical than a standard alert.
+  [[392.00, 0, 0.066], [523.25, 0.2, 0.074], [659.25, 0.42, 0.068], [523.25, 0.72, 0.054]].forEach(([hz, delay, peak]) => {
     const osc = ambientContext.createOscillator();
     const gain = ambientContext.createGain();
     osc.type = "sine";
     osc.frequency.setValueAtTime(hz, now + delay);
     gain.gain.setValueAtTime(0.0001, now + delay);
-    gain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.035);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.62);
+    gain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.78);
     osc.connect(gain); gain.connect(ambientContext.destination);
-    osc.start(now + delay); osc.stop(now + delay + 0.64);
+    osc.start(now + delay); osc.stop(now + delay + 0.8);
   });
 }
 
@@ -338,6 +352,7 @@ const resume=document.getElementById("resumeAfterBreak");
 resume.hidden=true;
 prompt.textContent="Let your eyes rest. The episode will wait.";
 overlay.style.display="flex";
+setAmbientBreak(true);
 countdown.focus();
 
 let seconds=20;
@@ -362,6 +377,7 @@ document.getElementById("breakOverlay").style.display="none";
 document.getElementById("resumeAfterBreak").hidden=true;
 document.getElementById("countdown").textContent="20";
 document.getElementById("breakPromptText").textContent="Let your eyes rest. The episode will wait.";
+setAmbientBreak(false);
 breakShown=false;
 playButton.focus();
 video.play().then(()=>{playButton.innerHTML="❚❚";}).catch(()=>{});
